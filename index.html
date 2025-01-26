@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Keyboard Layout Setup</title>
+    <style>
+        #canvas {
+            border: 1px solid black;
+        }
+        .button {
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <input type="file" id="upload" class="button" accept="image/png">
+    <button id="save-layout" class="button">Save Layout</button>
+    <button id="load-layout" class="button">Load Layout</button>
+    <canvas id="canvas"></canvas>
+    <script>
+        let KEY_COORDINATES = {};
+        let CHARACTERS = [];
+        let BASE_IMAGE = null;
+        let selectedMarker = null;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Load the keyboard template
+        document.getElementById('upload').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.onload = function() {
+                        BASE_IMAGE = img;
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        ctx.drawImage(img, 0, 0);
+                    }
+                    img.src = e.target.result;
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        canvas.addEventListener('click', function(event) {
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            const label = prompt("Enter key label:");
+            if (label) {
+                KEY_COORDINATES[label] = [x, y];
+                CHARACTERS.push(label);
+                drawMarker(x, y, label);
+            }
+        });
+
+        canvas.addEventListener('dblclick', function(event) {
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            const closestLabel = findClosestMarker(x, y);
+            if (closestLabel) {
+                selectedMarker = closestLabel;
+                highlightMarker(x, y);
+            }
+        });
+
+        function drawMarker(x, y, label) {
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = 'red';
+            ctx.fill();
+            ctx.fillStyle = 'black';
+            ctx.fillText(label, x, y - 10);
+        }
+
+        function highlightMarker(x, y) {
+            ctx.beginPath();
+            ctx.arc(x, y, 10, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'blue';
+            ctx.stroke();
+        }
+
+        function findClosestMarker(x, y) {
+            let closestLabel = null;
+            let minDist = Infinity;
+            for (const [label, coords] of Object.entries(KEY_COORDINATES)) {
+                const dist = Math.sqrt((x - coords[0]) ** 2 + (y - coords[1]) ** 2);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestLabel = label;
+                }
+            }
+            return closestLabel;
+        }
+
+        document.getElementById('save-layout').addEventListener('click', function() {
+            if (Object.keys(KEY_COORDINATES).length === 0) {
+                alert('No key coordinates defined!');
+                return;
+            }
+            const data = JSON.stringify({ coordinates: KEY_COORDINATES, characters: CHARACTERS });
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'keyboard_layout.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            alert('Keyboard layout saved to "keyboard_layout.json".');
+        });
+
+        document.getElementById('load-layout').addEventListener('click', function() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'application/json';
+            input.onchange = function(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const data = JSON.parse(e.target.result);
+                        KEY_COORDINATES = data.coordinates;
+                        CHARACTERS = data.characters;
+                        if (BASE_IMAGE) {
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            ctx.drawImage(BASE_IMAGE, 0, 0);
+                            for (const [label, [x, y]] of Object.entries(KEY_COORDINATES)) {
+                                drawMarker(x, y, label);
+                            }
+                        } else {
+                            alert('Please upload a keyboard template first!');
+                        }
+                    }
+                    reader.readAsText(file);
+                }
+            }
+            input.click();
+        });
+    </script>
+</body>
+</html>
