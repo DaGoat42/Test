@@ -1,152 +1,251 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Keyboard Layout Setup</title>
-    <style>
-        #canvas {
-            border: 1px solid black;
-        }
-        .button {
-            margin: 10px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keyboard Layout Optimizer</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      text-align: center;
+    }
+    #canvas-container {
+      position: relative;
+      display: inline-block;
+    }
+    canvas {
+      border: 1px solid #ccc;
+    }
+    #label-input-container {
+      display: none;
+      position: absolute;
+      background: white;
+      border: 1px solid #ccc;
+      padding: 10px;
+      z-index: 10;
+    }
+    #controls {
+      margin-top: 20px;
+    }
+    #optimization {
+      margin-top: 20px;
+    }
+    #results {
+      margin-top: 20px;
+    }
+  </style>
 </head>
 <body>
-    <input type="file" id="upload" class="button" accept="image/png">
-    <button id="save-layout" class="button">Save Layout</button>
-    <button id="load-layout" class="button">Load Layout</button>
-    <canvas id="canvas"></canvas>
-    <script>
-        let KEY_COORDINATES = {};
-        let CHARACTERS = [];
-        let BASE_IMAGE = null;
-        let selectedMarker = null;
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const MAX_WIDTH = 800; // Set the maximum width for the image
+  <h1>Keyboard Layout Optimizer</h1>
+  <div id="canvas-container">
+    <canvas id="keyboard-canvas"></canvas>
+    <div id="label-input-container">
+      <input type="text" id="label-input" placeholder="Enter key label">
+      <label>
+        <span>Color:</span>
+        <input type="color" id="color-picker" value="#ff0000">
+      </label>
+      <button id="add-label-button">Add</button>
+    </div>
+  </div>
+  <div id="controls">
+    <button id="upload-template">Upload Keyboard Template</button>
+    <button id="save-layout">Save Layout</button>
+    <button id="load-layout">Load Layout</button>
+    <button id="save-image">Save as Image</button>
+  </div>
+  <div id="optimization">
+    <h2>Optimization</h2>
+    <label for="input-text">Text for Optimization:</label>
+    <input type="text" id="input-text" placeholder="Enter text to optimize">
+    <button id="run-optimization">Run Optimization</button>
+    <div id="results"></div>
+  </div>
+  <input type="file" id="file-input" accept=".json, .png" style="display: none;">
 
-        // Load the keyboard template
-        document.getElementById('upload').addEventListener('change', function(event) {
-            const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const img = new Image();
-                    img.onload = function() {
-                        const aspectRatio = img.height / img.width;
-                        BASE_IMAGE = img;
-                        if (img.width > MAX_WIDTH) {
-                            canvas.width = MAX_WIDTH;
-                            canvas.height = MAX_WIDTH * aspectRatio;
-                        } else {
-                            canvas.width = img.width;
-                            canvas.height = img.height;
-                        }
-                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    }
-                    img.src = e.target.result;
-                }
-                reader.readAsDataURL(file);
-            }
-        });
+  <script>
+    const canvas = document.getElementById('keyboard-canvas');
+    const ctx = canvas.getContext('2d');
+    const fileInput = document.getElementById('file-input');
+    const labelInputContainer = document.getElementById('label-input-container');
+    const labelInput = document.getElementById('label-input');
+    const colorPicker = document.getElementById('color-picker');
+    const addLabelButton = document.getElementById('add-label-button');
+    const inputText = document.getElementById('input-text');
+    const resultsContainer = document.getElementById('results');
 
-        canvas.addEventListener('click', function(event) {
-            const rect = canvas.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-            const label = prompt("Enter key label:");
-            if (label) {
-                KEY_COORDINATES[label] = [x, y];
-                CHARACTERS.push(label);
-                drawMarker(x, y, label);
-            }
-        });
+    let keyboardTemplate = null; // Image of the uploaded keyboard template
+    let markers = []; // Array to store marker positions, labels, colors
+    let draggingMarker = null;
 
-        canvas.addEventListener('dblclick', function(event) {
-            const rect = canvas.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-            const closestLabel = findClosestMarker(x, y);
-            if (closestLabel) {
-                selectedMarker = closestLabel;
-                highlightMarker(x, y);
-            }
-        });
+    // Initialize canvas dimensions
+    const MAX_WIDTH = 800;
+    const MAX_HEIGHT = 400;
 
-        function drawMarker(x, y, label) {
-            ctx.beginPath();
-            ctx.arc(x, y, 5, 0, 2 * Math.PI);
-            ctx.fillStyle = 'red';
-            ctx.fill();
-            ctx.fillStyle = 'black';
-            ctx.fillText(label, x, y - 10);
+    // Finger assignment
+    const fingerAssignments = {
+      leftPinky: ['q', 'a', 'z', 'shift-left'],
+      leftRing: ['w', 's', 'x'],
+      leftMiddle: ['e', 'd', 'c'],
+      leftIndex: ['r', 't', 'f', 'g', 'v', 'b'],
+      rightIndex: ['y', 'u', 'h', 'j', 'n', 'm'],
+      rightMiddle: ['i', 'k', ','],
+      rightRing: ['o', 'l', '.'],
+      rightPinky: ['p', ';', '/', 'shift-right'],
+      thumbs: ['space']
+    };
+
+    // Draw the canvas
+    function drawCanvas(highlightKeys = null) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (keyboardTemplate) {
+        ctx.drawImage(keyboardTemplate, 0, 0, canvas.width, canvas.height);
+      }
+
+      // Draw all markers
+      markers.forEach(marker => {
+        const { x, y, label, color } = marker;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = highlightKeys && highlightKeys[label] ? highlightKeys[label] : (color || 'red');
+        ctx.fill();
+        ctx.stroke();
+
+        if (label) {
+          ctx.fillStyle = 'black';
+          ctx.font = '12px Arial';
+          ctx.fillText(label, x + 10, y - 10);
+        }
+      });
+    }
+
+    // Assign finger to a key based on its label
+    function getFingerForKey(keyLabel) {
+      for (const [finger, keys] of Object.entries(fingerAssignments)) {
+        if (keys.includes(keyLabel.toLowerCase())) {
+          return finger;
+        }
+      }
+      return null; // No finger assigned
+    }
+
+    // Calculate distance for a layout with multi-finger tracking
+    function calculateDistance(layout, text) {
+      const fingerPositions = {}; // Tracks the last position of each finger
+      let totalDistance = 0;
+
+      for (const char of text) {
+        const marker = layout.find(m => m.label === char);
+        if (!marker) continue;
+
+        const finger = getFingerForKey(marker.label);
+        if (!finger) continue;
+
+        const position = [marker.x, marker.y];
+
+        if (fingerPositions[finger]) {
+          const [lastX, lastY] = fingerPositions[finger];
+          const dx = position[0] - lastX;
+          const dy = position[1] - lastY;
+          totalDistance += Math.sqrt(dx * dx + dy * dy);
         }
 
-        function highlightMarker(x, y) {
-            ctx.beginPath();
-            ctx.arc(x, y, 10, 0, 2 * Math.PI);
-            ctx.strokeStyle = 'blue';
-            ctx.stroke();
+        fingerPositions[finger] = position; // Update finger position
+      }
+
+      return totalDistance;
+    }
+
+    // Upload keyboard template
+    document.getElementById('upload-template').addEventListener('click', () => {
+      fileInput.accept = '.png';
+      fileInput.onchange = event => {
+        const file = event.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const img = new Image();
+            img.onload = () => {
+              const scaleFactor = Math.min(MAX_WIDTH / img.width, MAX_HEIGHT / img.height, 1);
+              keyboardTemplate = img;
+              canvas.width = img.width * scaleFactor;
+              canvas.height = img.height * scaleFactor;
+              drawCanvas();
+            };
+            img.src = reader.result;
+          };
+          reader.readAsDataURL(file);
         }
+      };
+      fileInput.click();
+    });
 
-        function findClosestMarker(x, y) {
-            let closestLabel = null;
-            let minDist = Infinity;
-            for (const [label, coords] of Object.entries(KEY_COORDINATES)) {
-                const dist = Math.sqrt((x - coords[0]) ** 2 + (y - coords[1]) ** 2);
-                if (dist < minDist) {
-                    minDist = dist;
-                    closestLabel = label;
-                }
-            }
-            return closestLabel;
+    // Run optimization algorithm
+    document.getElementById('run-optimization').addEventListener('click', () => {
+      const text = inputText.value.trim();
+      if (!text) {
+        alert('Please enter text for optimization.');
+        return;
+      }
+
+      // Generate random layouts and calculate distances
+      const layouts = [];
+      for (let i = 0; i < 20; i++) {
+        const shuffledMarkers = [...markers].sort(() => Math.random() - 0.5);
+        layouts.push({ layout: shuffledMarkers, distance: calculateDistance(shuffledMarkers, text) });
+      }
+
+      // Sort layouts by distance
+      layouts.sort((a, b) => a.distance - b.distance);
+
+      // Display the two best layouts
+      resultsContainer.innerHTML = '<h3>Top 2 Optimized Layouts</h3>';
+      layouts.slice(0, 2).forEach((result, index) => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+          <h4>Layout ${index + 1}</h4>
+          <p>Total Distance: ${result.distance.toFixed(2)}</p>
+        `;
+        resultsContainer.appendChild(div);
+      });
+    });
+
+    // Event listeners for dragging and adding markers
+    canvas.addEventListener('mousedown', event => {
+      const { offsetX: x, offsetY: y } = event;
+      draggingMarker = markers.find(marker => Math.hypot(marker.x - x, marker.y - y) < 10);
+    });
+    canvas.addEventListener('mousemove', event => {
+      if (draggingMarker) {
+        const { offsetX: x, offsetY: y } = event;
+        draggingMarker.x = x;
+        draggingMarker.y = y;
+        drawCanvas();
+      }
+    });
+    canvas.addEventListener('mouseup', () => (draggingMarker = null));
+    canvas.addEventListener('dblclick', event => {
+      const { offsetX: x, offsetY: y } = event;
+      labelInputContainer.style.display = 'block';
+      labelInputContainer.style.left = `${event.pageX}px`;
+      labelInputContainer.style.top = `${event.pageY}px`;
+
+      addLabelButton.onclick = () => {
+        const label = labelInput.value.trim();
+        const color = colorPicker.value;
+        if (label) {
+          markers.push({ x, y, label, color });
         }
+        labelInputContainer.style.display = 'none';
+        labelInput.value = '';
+        drawCanvas();
+      };
+    });
 
-        document.getElementById('save-layout').addEventListener('click', function() {
-            if (Object.keys(KEY_COORDINATES).length === 0) {
-                alert('No key coordinates defined!');
-                return;
-            }
-            const data = JSON.stringify({ coordinates: KEY_COORDINATES, characters: CHARACTERS });
-            const blob = new Blob([data], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'keyboard_layout.json';
-            a.click();
-            URL.revokeObjectURL(url);
-            alert('Keyboard layout saved to "keyboard_layout.json".');
-        });
-
-        document.getElementById('load-layout').addEventListener('click', function() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'application/json';
-            input.onchange = function(event) {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        const data = JSON.parse(e.target.result);
-                        KEY_COORDINATES = data.coordinates;
-                        CHARACTERS = data.characters;
-                        if (BASE_IMAGE) {
-                            ctx.clearRect(0, 0, canvas.width, canvas.height);
-                            ctx.drawImage(BASE_IMAGE, 0, 0, canvas.width, canvas.height);
-                            for (const [label, [x, y]] of Object.entries(KEY_COORDINATES)) {
-                                drawMarker(x, y, label);
-                            }
-                        } else {
-                            alert('Please upload a keyboard template first!');
-                        }
-                    }
-                    reader.readAsText(file);
-                }
-            }
-            input.click();
-        });
-    </script>
+    // Initial draw
+    drawCanvas();
+  </script>
 </body>
 </html>
