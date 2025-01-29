@@ -1,0 +1,38 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+  text-align: center;
+}
+
+#canvas-container {
+  position: relative;
+  display: inline-block;
+}
+
+canvas {
+  border: 1px solid #ccc;
+}
+
+#controls,
+#character-input,
+#optimization,
+#results {
+  margin-top: 20px;
+}
+
+.context-menu {
+  position: absolute;
+  display: none;
+  background: white;
+  border: 1px solid #ccc;
+  z-index: 1000;
+}
+
+.context-menu-item {
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.context-menu-item:hover {
+  background: #f0f0f0;
+}
