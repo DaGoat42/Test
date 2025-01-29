@@ -17,15 +17,10 @@
     canvas {
       border: 1px solid #ccc;
     }
-    #label-input-container {
-      display: none;
-      position: absolute;
-      background: white;
-      border: 1px solid #ccc;
-      padding: 10px;
-      z-index: 10;
-    }
     #controls {
+      margin-top: 20px;
+    }
+    #character-input {
       margin-top: 20px;
     }
     #optimization {
@@ -34,26 +29,38 @@
     #results {
       margin-top: 20px;
     }
+    .context-menu {
+      position: absolute;
+      display: none;
+      background: white;
+      border: 1px solid #ccc;
+      z-index: 1000;
+    }
+    .context-menu-item {
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    .context-menu-item:hover {
+      background: #f0f0f0;
+    }
   </style>
 </head>
 <body>
   <h1>Keyboard Layout Optimizer</h1>
   <div id="canvas-container">
     <canvas id="keyboard-canvas"></canvas>
-    <div id="label-input-container">
-      <input type="text" id="label-input" placeholder="Enter key label">
-      <label>
-        <span>Color:</span>
-        <input type="color" id="color-picker" value="#ff0000">
-      </label>
-      <button id="add-label-button">Add</button>
+    <div id="context-menu" class="context-menu">
+      <div id="assign-finger" class="context-menu-item">Assign Finger</div>
     </div>
   </div>
   <div id="controls">
     <button id="upload-template">Upload Keyboard Template</button>
     <button id="save-layout">Save Layout</button>
     <button id="load-layout">Load Layout</button>
-    <button id="save-image">Save as Image</button>
+  </div>
+  <div id="character-input">
+    <label for="allowed-characters">Allowed Characters:</label>
+    <input type="text" id="allowed-characters" placeholder="Enter keys like abc123!@#EnterShift">
   </div>
   <div id="optimization">
     <h2>Optimization</h2>
@@ -64,40 +71,42 @@
   </div>
   <input type="file" id="file-input" accept=".json, .png" style="display: none;">
 
+  <script src="generative-algorithm.js"></script>
   <script>
     const canvas = document.getElementById('keyboard-canvas');
     const ctx = canvas.getContext('2d');
     const fileInput = document.getElementById('file-input');
-    const labelInputContainer = document.getElementById('label-input-container');
-    const labelInput = document.getElementById('label-input');
-    const colorPicker = document.getElementById('color-picker');
-    const addLabelButton = document.getElementById('add-label-button');
+    const allowedCharactersInput = document.getElementById('allowed-characters');
     const inputText = document.getElementById('input-text');
     const resultsContainer = document.getElementById('results');
+    const contextMenu = document.getElementById('context-menu');
+    const assignFingerOption = document.getElementById('assign-finger');
 
     let keyboardTemplate = null; // Image of the uploaded keyboard template
-    let markers = []; // Array to store marker positions, labels, colors
+    let markers = []; // Array to store marker positions
     let draggingMarker = null;
 
-    // Initialize canvas dimensions
+    const markerFingers = {}; // Stores finger assignments (marker index -> finger)
+
     const MAX_WIDTH = 800;
     const MAX_HEIGHT = 400;
 
-    // Finger assignment
-    const fingerAssignments = {
-      leftPinky: ['q', 'a', 'z', 'shift-left'],
-      leftRing: ['w', 's', 'x'],
-      leftMiddle: ['e', 'd', 'c'],
-      leftIndex: ['r', 't', 'f', 'g', 'v', 'b'],
-      rightIndex: ['y', 'u', 'h', 'j', 'n', 'm'],
-      rightMiddle: ['i', 'k', ','],
-      rightRing: ['o', 'l', '.'],
-      rightPinky: ['p', ';', '/', 'shift-right'],
-      thumbs: ['space']
+    const fingerColors = {
+      'Left Pinky': 'red',
+      'Left Ring': 'orange',
+      'Left Middle': 'yellow',
+      'Left Index': 'green',
+      'Right Index': 'blue',
+      'Right Middle': 'purple',
+      'Right Ring': 'pink',
+      'Right Pinky': 'brown',
+      'Thumbs': 'gray',
     };
 
+    const availableFingers = Object.keys(fingerColors);
+
     // Draw the canvas
-    function drawCanvas(highlightKeys = null) {
+    function drawCanvas(layout = null) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (keyboardTemplate) {
@@ -105,58 +114,85 @@
       }
 
       // Draw all markers
-      markers.forEach(marker => {
-        const { x, y, label, color } = marker;
+      markers.forEach((marker, index) => {
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = highlightKeys && highlightKeys[label] ? highlightKeys[label] : (color || 'red');
+        ctx.arc(marker.x, marker.y, 5, 0, Math.PI * 2);
+
+        // Color markers based on finger assignment
+        const finger = markerFingers[index];
+        ctx.fillStyle = finger ? fingerColors[finger] : 'red';
+
         ctx.fill();
         ctx.stroke();
 
-        if (label) {
+        // Display finger or layout character
+        if (layout && layout[index] && layout[index].character) {
           ctx.fillStyle = 'black';
           ctx.font = '12px Arial';
-          ctx.fillText(label, x + 10, y - 10);
+          ctx.fillText(layout[index].character, marker.x + 10, marker.y - 10);
+        } else if (finger) {
+          ctx.fillStyle = 'black';
+          ctx.font = '12px Arial';
+          ctx.fillText(finger, marker.x + 10, marker.y - 10);
         }
       });
     }
 
-    // Assign finger to a key based on its label
-    function getFingerForKey(keyLabel) {
-      for (const [finger, keys] of Object.entries(fingerAssignments)) {
-        if (keys.includes(keyLabel.toLowerCase())) {
-          return finger;
-        }
-      }
-      return null; // No finger assigned
+    // Handle marker dragging
+    function startDragging(event) {
+      const { offsetX: x, offsetY: y } = event;
+      draggingMarker = markers.find(marker => Math.hypot(marker.x - x, marker.y - y) < 10);
     }
 
-    // Calculate distance for a layout with multi-finger tracking
-    function calculateDistance(layout, text) {
-      const fingerPositions = {}; // Tracks the last position of each finger
-      let totalDistance = 0;
-
-      for (const char of text) {
-        const marker = layout.find(m => m.label === char);
-        if (!marker) continue;
-
-        const finger = getFingerForKey(marker.label);
-        if (!finger) continue;
-
-        const position = [marker.x, marker.y];
-
-        if (fingerPositions[finger]) {
-          const [lastX, lastY] = fingerPositions[finger];
-          const dx = position[0] - lastX;
-          const dy = position[1] - lastY;
-          totalDistance += Math.sqrt(dx * dx + dy * dy);
-        }
-
-        fingerPositions[finger] = position; // Update finger position
+    function dragMarker(event) {
+      if (draggingMarker) {
+        const { offsetX: x, offsetY: y } = event;
+        draggingMarker.x = x;
+        draggingMarker.y = y;
+        drawCanvas();
       }
-
-      return totalDistance;
     }
+
+    function stopDragging() {
+      draggingMarker = null;
+    }
+
+    // Add a new marker
+    canvas.addEventListener('dblclick', event => {
+      const { offsetX: x, offsetY: y } = event;
+      markers.push({ x, y });
+      drawCanvas();
+    });
+
+    // Show context menu on right-click
+    canvas.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      const { offsetX: x, offsetY: y } = event;
+      const markerIndex = markers.findIndex(marker => Math.hypot(marker.x - x, marker.y - y) < 10);
+
+      if (markerIndex !== -1) {
+        contextMenu.style.display = 'block';
+        contextMenu.style.left = `${event.pageX}px`;
+        contextMenu.style.top = `${event.pageY}px`;
+
+        // Assign finger
+        assignFingerOption.onclick = () => {
+          const finger = prompt(`Assign a finger to this marker:\n${availableFingers.join(', ')}`);
+          if (availableFingers.includes(finger)) {
+            markerFingers[markerIndex] = finger;
+            drawCanvas();
+          }
+          contextMenu.style.display = 'none';
+        };
+      } else {
+        contextMenu.style.display = 'none';
+      }
+    });
+
+    // Hide context menu on click
+    document.addEventListener('click', () => {
+      contextMenu.style.display = 'none';
+    });
 
     // Upload keyboard template
     document.getElementById('upload-template').addEventListener('click', () => {
@@ -182,67 +218,65 @@
       fileInput.click();
     });
 
+    // Save layout as JSON
+    document.getElementById('save-layout').addEventListener('click', () => {
+      const layout = {
+        markers,
+        allowedCharacters: allowedCharactersInput.value.trim(),
+        markerFingers,
+      };
+      const blob = new Blob([JSON.stringify(layout, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'keyboard_layout.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Load layout from JSON
+    document.getElementById('load-layout').addEventListener('click', () => {
+      fileInput.accept = '.json';
+      fileInput.onchange = event => {
+        const file = event.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const data = JSON.parse(reader.result);
+            markers = data.markers || [];
+            allowedCharactersInput.value = data.allowedCharacters || '';
+            Object.assign(markerFingers, data.markerFingers || {});
+            drawCanvas();
+          };
+        }
+      });
+      fileInput.click();
+    });
+
     // Run optimization algorithm
     document.getElementById('run-optimization').addEventListener('click', () => {
       const text = inputText.value.trim();
-      if (!text) {
-        alert('Please enter text for optimization.');
+      const allowedCharacters = allowedCharactersInput.value.trim();
+
+      if (!text || !allowedCharacters) {
+        alert('Please enter text and allowed characters for optimization.');
         return;
       }
 
-      // Generate random layouts and calculate distances
-      const layouts = [];
-      for (let i = 0; i < 20; i++) {
-        const shuffledMarkers = [...markers].sort(() => Math.random() - 0.5);
-        layouts.push({ layout: shuffledMarkers, distance: calculateDistance(shuffledMarkers, text) });
-      }
+      const bestLayout = runGenerativeAlgorithm(markers, markerFingers, allowedCharacters, text);
+      resultsContainer.innerHTML = `
+        <h3>Optimized Layout</h3>
+        <p>Total Distance: ${bestLayout.distance.toFixed(2)}</p>
+      `;
 
-      // Sort layouts by distance
-      layouts.sort((a, b) => a.distance - b.distance);
-
-      // Display the two best layouts
-      resultsContainer.innerHTML = '<h3>Top 2 Optimized Layouts</h3>';
-      layouts.slice(0, 2).forEach((result, index) => {
-        const div = document.createElement('div');
-        div.innerHTML = `
-          <h4>Layout ${index + 1}</h4>
-          <p>Total Distance: ${result.distance.toFixed(2)}</p>
-        `;
-        resultsContainer.appendChild(div);
-      });
+      // Visualize the optimized layout
+      drawCanvas(bestLayout.layout);
     });
 
-    // Event listeners for dragging and adding markers
-    canvas.addEventListener('mousedown', event => {
-      const { offsetX: x, offsetY: y } = event;
-      draggingMarker = markers.find(marker => Math.hypot(marker.x - x, marker.y - y) < 10);
-    });
-    canvas.addEventListener('mousemove', event => {
-      if (draggingMarker) {
-        const { offsetX: x, offsetY: y } = event;
-        draggingMarker.x = x;
-        draggingMarker.y = y;
-        drawCanvas();
-      }
-    });
-    canvas.addEventListener('mouseup', () => (draggingMarker = null));
-    canvas.addEventListener('dblclick', event => {
-      const { offsetX: x, offsetY: y } = event;
-      labelInputContainer.style.display = 'block';
-      labelInputContainer.style.left = `${event.pageX}px`;
-      labelInputContainer.style.top = `${event.pageY}px`;
-
-      addLabelButton.onclick = () => {
-        const label = labelInput.value.trim();
-        const color = colorPicker.value;
-        if (label) {
-          markers.push({ x, y, label, color });
-        }
-        labelInputContainer.style.display = 'none';
-        labelInput.value = '';
-        drawCanvas();
-      };
-    });
+    // Event listeners for dragging
+    canvas.addEventListener('mousedown', startDragging);
+    canvas.addEventListener('mousemove', dragMarker);
+    canvas.addEventListener('mouseup', stopDragging);
 
     // Initial draw
     drawCanvas();
