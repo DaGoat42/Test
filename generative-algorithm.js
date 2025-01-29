@@ -1,6 +1,6 @@
 function calculateDistance(layout, text) {
   let totalDistance = 0;
-  let lastFingerPositions = {}; // Stores the last used position per finger
+  let lastFingerPositions = {};
 
   for (const char of text) {
     const marker = layout.find(m => m.character === char);
@@ -16,7 +16,7 @@ function calculateDistance(layout, text) {
       totalDistance += Math.sqrt(dx * dx + dy * dy);
     }
 
-    lastFingerPositions[finger] = position; // Update the finger’s last used position
+    lastFingerPositions[finger] = position;
   }
 
   return totalDistance;
@@ -26,7 +26,6 @@ function runGenerativeAlgorithm(markers, markerFingers, allowedCharacters, text)
   const layouts = [];
 
   for (let i = 0; i < 50; i++) {
-    // Create a shuffled character assignment while keeping assigned fingers
     let availableCharacters = allowedCharacters.split('');
     let assignedLayout = markers.map((marker, index) => ({
       x: marker.x,
@@ -42,5 +41,5 @@ function runGenerativeAlgorithm(markers, markerFingers, allowedCharacters, text)
   }
 
   layouts.sort((a, b) => a.distance - b.distance);
-  return layouts[0]; // Return the best layout
+  return layouts[0];
 }
