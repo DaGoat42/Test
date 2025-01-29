@@ -23,6 +23,27 @@ function calculateDistance(layout, text) {
 }
 
 function runGenerativeAlgorithm(markers, markerFingers, allowedCharacters, text) {
+  let layouts = createInitialLayouts(markers, markerFingers, allowedCharacters, text);
+  let generation = 0;
+
+  function optimize() {
+    if (!optimizationRunning) return;
+
+    layouts = sortLayoutsByDistance(layouts, text);
+    layouts = createNextGeneration(layouts);
+    generation++;
+    
+    if (generation % 10 === 0) {
+      displayBestLayout(layouts[0]);
+    }
+
+    requestAnimationFrame(optimize);
+  }
+
+  optimize();
+}
+
+function createInitialLayouts(markers, markerFingers, allowedCharacters, text) {
   const layouts = [];
 
   for (let i = 0; i < 50; i++) {
@@ -40,6 +61,46 @@ function runGenerativeAlgorithm(markers, markerFingers, allowedCharacters, text)
     });
   }
 
-  layouts.sort((a, b) => a.distance - b.distance);
-  return layouts[0];
+  return layouts;
+}
+
+function sortLayoutsByDistance(layouts, text) {
+  layouts.forEach(layout => {
+    layout.distance = calculateDistance(layout.layout, text);
+  });
+  return layouts.sort((a, b) => a.distance - b.distance);
+}
+
+function createNextGeneration(layouts) {
+  const newLayouts = [];
+
+  for (let i = 0; i < layouts.length / 2; i++) {
+    const parent1 = layouts[i].layout;
+    const parent2 = layouts[layouts.length - 1 - i].layout;
+
+    const child1 = crossover(parent1, parent2);
+    const child2 = crossover(parent2, parent1);
+
+    newLayouts.push({ layout: child1, distance: 0 });
+    newLayouts.push({ layout: child2, distance: 0 });
+  }
+
+  return newLayouts;
+}
+
+function crossover(parent1, parent2) {
+  const crossoverPoint = Math.floor(Math.random() * parent1.length);
+  return parent1.slice(0, crossoverPoint).concat(parent2.slice(crossoverPoint));
+}
+
+function displayBestLayout(bestLayout) {
+  const bestLayoutDiv = document.createElement('div');
+  bestLayoutDiv.innerHTML = `
+    <h3>Best Layout so far</h3>
+    <p>Total Distance: ${bestLayout.distance.toFixed(2)}</p>
+  `;
+  resultsContainer.innerHTML = '';
+  resultsContainer.appendChild(bestLayoutDiv);
+
+  drawCanvas(bestLayout.layout);
 }
